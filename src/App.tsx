@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleUserRound, ImagePlus, LockKeyhole, MapPin, Plus, Users, X } from 'lucide-react'
 
 type Invite = { id: number; title: string; type: string; date: string; dateInput?: string; timeInput?: string; place: string; guests: number; guestNames: string[]; tables: { name: string; guests: string[] }[] }
@@ -15,6 +15,9 @@ const occasions = ['Wedding', 'Birthday', 'Baptism', 'Company event', 'Dinner pa
 
 function App() {
   const savedUi = readSavedUi()
+  const [access, setAccess] = useState<'checking' | 'locked' | 'open' | 'setup'>('checking')
+  const [accessPassword, setAccessPassword] = useState('')
+  const [accessError, setAccessError] = useState('')
   const [screen, setScreen] = useState<Screen>(() => {
     try {
       if (localStorage.getItem('invitecyprus-demo-session') !== 'signed-in') return 'login'
@@ -38,6 +41,24 @@ function App() {
   const [newGuest, setNewGuest] = useState(savedUi.newGuest ?? '')
   const [newTable, setNewTable] = useState(savedUi.newTable ?? '')
   const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    fetch('/__invitecyprus/access', { credentials: 'same-origin' })
+      .then(async (response) => ({ response, data: await response.json() as { configured?: boolean; authorized?: boolean } }))
+      .then(({ response, data }) => setAccess(!data.configured ? 'setup' : response.ok && data.authorized ? 'open' : 'locked'))
+      .catch(() => setAccess('setup'))
+  }, [])
+
+  const unlockPreview = async (event: FormEvent) => {
+    event.preventDefault()
+    setAccessError('')
+    try {
+      const response = await fetch('/__invitecyprus/access', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ password: accessPassword }) })
+      if (!response.ok) { setAccessError(response.status === 401 ? 'That password doesn’t match. Try again.' : 'The password gate isn’t configured yet.'); return }
+      setAccess('open')
+      setAccessPassword('')
+    } catch { setAccessError('Could not check the password. Make sure the app is running locally.') }
+  }
 
   useEffect(() => {
     try {
@@ -106,6 +127,8 @@ function App() {
   }
 
   const managedInvite = invites.find((invite) => invite.id === manageId)
+
+  if (access !== 'open') return <main className="access-screen"><div className="access-card"><div className="access-brand"><span className="simple-mark"><i/><i/><i/><i/></span>invitecyprus</div><span className="login-icon"><LockKeyhole size={19}/></span><p className="simple-overline">PRIVATE PREVIEW</p><h1>{access === 'checking' ? 'Checking access…' : access === 'setup' ? 'Set up preview access' : 'Enter the password'}</h1>{access === 'setup' ? <p className="access-copy">Create a <code>.env.local</code> file in the project folder and add <code>INVITECYPRUS_ACCESS_PASSWORD=your-password</code>. Restart the dev server to apply it.</p> : access === 'checking' ? <p className="access-copy">One moment while we check this preview.</p> : <form onSubmit={unlockPreview}><p className="access-copy">Enter the preview password to continue.</p><label htmlFor="preview-password">Password</label><input id="preview-password" type="password" autoFocus autoComplete="current-password" value={accessPassword} onChange={(e) => setAccessPassword(e.target.value)} placeholder="Enter preview password" required/><button className="simple-primary full-button" type="submit">Open invitecyprus <ArrowRight size={15}/></button>{accessError && <p className="access-error">{accessError}</p>}</form>}</div></main>
 
   return <div className="simple-app">
     <header className="simple-header"><button className="simple-brand" onClick={() => setScreen(screen === 'login' ? 'login' : 'home')}><span className="simple-mark"><i/><i/><i/><i/></span>invitecyprus</button>{screen !== 'login' && <div className="account-chip"><span className="account-initial">E</span><span>Emma Wilson</span><ChevronRight size={14}/></div>}</header>
