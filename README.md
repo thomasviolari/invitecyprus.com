@@ -11,9 +11,9 @@ Restart `npm run dev` after changing the password. `.env.local` is ignored by Gi
 
 For production on Vercel, add `INVITECYPRUS_ACCESS_PASSWORD` as an environment variable for the Production environment in Project Settings → Environment Variables, then redeploy. The root Vercel middleware protects the HTML and static app assets and issues an eight-hour signed, HTTP-only session cookie after a correct password. The environment variable is never bundled into the browser app.
 
-## Google Maps previews
+## Event schedule locations
 
-Hosts can paste a Google Maps link for the venue and for each schedule location. Guests can open these links in Google Maps without an API key. To show an embedded map preview in the editor, create a browser key for the [Google Maps Embed API](https://developers.google.com/maps/documentation/embed/quickstart), restrict it to your website and that API, then set `VITE_GOOGLE_MAPS_EMBED_KEY` in `.env.local` locally and in your Vercel project settings. This key is public in the browser, so use website/API restrictions; never put a private server key here.
+Hosts can add a place or paste a Google Maps link into each event-day schedule moment. Guests can open those links in Google Maps without a Maps API key.
 
 ## User accounts
 
