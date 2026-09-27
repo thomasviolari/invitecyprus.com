@@ -1133,6 +1133,12 @@
   border-top: 1px solid #eeeee7;
 }
 
+.mobile-guest-edit-actions .mobile-guest-share {
+  grid-column: 1 / -1;
+  justify-content: center;
+  color: #49654b;
+}
+
 .mobile-guest-edit-actions button {
   min-width: 0;
   min-height: 48px;
@@ -1419,6 +1425,40 @@
   resize: vertical;
 }
 
+.invitation-share-field input.invitation-share-url {
+  border-color: #cbd9c7;
+  background: #f1f6ef;
+  color: #385f40;
+  font-weight: 600;
+}
+
+.invitation-share-local-note,
+.public-local-preview-note {
+  border-radius: 7px;
+  background: #f5f0e5;
+  color: #776646;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+.invitation-share-local-note {
+  margin: -9px 0 15px;
+}
+
+.public-local-preview-note {
+  margin: 0 0 16px;
+}
+
+.invitation-share-open {
+  width: 100%;
+  min-height: 46px;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #426349;
+}
+
 .invitation-share-seat-note {
   display: flex;
   align-items: flex-start;
@@ -1439,6 +1479,38 @@
   cursor: wait;
 }
 
+.invitation-share-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 0 0 12px;
+}
+
+.invitation-share-options button {
+  min-width: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e5e8df;
+  border-radius: 7px;
+  background: #fff;
+  color: #526452;
+  font: 500 13px 'DM Sans', sans-serif;
+}
+
+.invitation-share-options button:hover:not(:disabled) {
+  border-color: #bdc9b7;
+  background: #f5f7f2;
+}
+
+.invitation-share-options button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .public-invite-page {
   min-height: 100vh;
   min-height: 100svh;
@@ -1457,6 +1529,161 @@
   gap: 15px;
   margin: 0 auto;
   border-bottom: 1px solid #e8e9e1;
+}
+
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #7c8678;
+  white-space: nowrap;
+}
+
+.language-picker > span {
+  font-size: 11px;
+}
+
+.language-picker select {
+  max-width: 150px;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid #e6e8df;
+  border-radius: 7px;
+  background: #fff;
+  color: #455548;
+  font: 500 12px 'DM Sans', sans-serif;
+}
+
+.simple-header > .language-picker {
+  margin-inline-start: auto;
+  margin-inline-end: 15px;
+}
+
+.access-card > .language-picker {
+  margin: -16px 0 23px auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.public-invite-header .language-picker {
+  margin-inline-start: auto;
+  margin-inline-end: 14px;
+}
+
+.public-invite-header .public-invite-label {
+  white-space: nowrap;
+}
+
+.unseated-guest-row > div small {
+  line-height: 1.5;
+}
+
+:root[dir='rtl'] .simple-app,
+:root[dir='rtl'] .public-invite-page,
+:root[dir='rtl'] .access-screen {
+  direction: rtl;
+}
+
+:root[dir='rtl'] .choice-card,
+:root[dir='rtl'] .managed-content,
+:root[dir='rtl'] .wizard-step,
+:root[dir='rtl'] .people-modal,
+:root[dir='rtl'] .mobile-guest-edit-modal,
+:root[dir='rtl'] .invitation-share-modal,
+:root[dir='rtl'] .public-invite-content {
+  text-align: right;
+}
+
+:root[dir='rtl'] .people-close {
+  right: auto;
+  left: 14px;
+}
+
+:root[dir='rtl'] .login-welcome {
+  padding-left: 8vw;
+  padding-right: max(10vw, 40px);
+}
+
+:root[dir='rtl'] .art-note {
+  right: auto;
+  left: 0;
+}
+
+:root[dir='rtl'] .art-circle {
+  right: auto;
+  left: 15px;
+}
+
+:root[dir='rtl'] .manage-preview,
+:root[dir='rtl'] .choice-flower {
+  right: auto;
+  left: 18px;
+}
+
+:root[dir='rtl'] .profile-menu {
+  right: auto;
+  left: 0;
+}
+
+:root[dir='rtl'] .art-note,
+:root[dir='rtl'] .art-circle,
+:root[dir='rtl'] .manage-preview,
+:root[dir='rtl'] .choice-flower {
+  right: auto;
+  left: 0;
+}
+
+:root[dir='rtl'] .art-caption {
+  left: auto;
+  right: 3px;
+}
+
+:root[dir='rtl'] .cover-remove-control {
+  right: auto;
+  left: 7px;
+}
+
+:root[dir='rtl'] .managed-content {
+  padding-inline: 5px;
+}
+
+:root[dir='rtl'] .simple-toast {
+  direction: rtl;
+}
+
+:root[dir='rtl'] .simple-brand .simple-mark,
+:root[dir='rtl'] .public-invite-brand .simple-mark {
+  direction: ltr;
+}
+
+:root[dir='rtl'] .simple-toast {
+  right: auto;
+  left: 22px;
+}
+
+@media (max-width: 560px) {
+  .language-picker > span {
+    display: none;
+  }
+
+  .language-picker select {
+    max-width: 115px;
+    min-height: 34px;
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+
+  .simple-header > .language-picker {
+    margin-inline-end: 7px;
+  }
+
+  .public-invite-header .language-picker {
+    margin-inline-end: 8px;
+  }
+
+  :root[dir='rtl'] .simple-toast {
+    left: 12px;
+  }
 }
 
 .public-invite-brand {
@@ -1765,6 +1992,11 @@
   border: 1px solid #e7e8df;
   border-radius: 12px;
   background: #fff;
+}
+
+.public-invite-state > .language-picker {
+  justify-content: flex-end;
+  margin: -8px 0 21px;
 }
 
 .public-invite-state h1 {

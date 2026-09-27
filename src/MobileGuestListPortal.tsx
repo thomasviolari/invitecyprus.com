@@ -17,9 +17,10 @@ type Props = {
   channels: string[]
   onSave: (id: string, update: Partial<GuestGroup>) => void
   onRemove: (name: string) => void
+  onShare: (group: GuestGroup) => void
 }
 
-export default function MobileGuestListPortal({ active, groups, channels, onSave, onRemove }: Props) {
+export default function MobileGuestListPortal({ active, groups, channels, onSave, onRemove, onShare }: Props) {
   const [target, setTarget] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
@@ -31,7 +32,7 @@ export default function MobileGuestListPortal({ active, groups, channels, onSave
 
   return createPortal(
     <div className="guest-mobile-list">
-        {groups.map((group, index) => <MobileGuestCard key={group.id} group={group} index={index} channels={channels} onSave={onSave} onRemove={onRemove}/>)}
+        {groups.map((group, index) => <MobileGuestCard key={group.id} group={group} index={index} channels={channels} onSave={onSave} onRemove={onRemove} onShare={onShare}/>)}
     </div>,
     target,
   )
