@@ -354,10 +354,14 @@ function App() {
     if (code === 'auth/weak-password') return 'Choose a password with at least 8 characters.'
     if (code === 'auth/invalid-email') return 'Enter a valid email address.'
     if (code === 'auth/popup-closed-by-user') return 'The sign-in window was closed before finishing.'
+    if (code === 'auth/popup-blocked') return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.'
+    if (code === 'auth/cancelled-popup-request') return 'A Google sign-in window is already open. Finish or close it, then try again.'
+    if (code === 'auth/network-request-failed') return 'Google sign-in could not reach Firebase. Check your connection, VPN, or content blocker and try again.'
+    if (code === 'auth/web-storage-unsupported') return 'Google sign-in needs browser storage. Enable cookies and site data for this site, then try again.'
     if (code === 'auth/account-exists-with-different-credential') return 'An account with this email already uses a different sign-in method. Log in with that method first.'
     if (code === 'auth/operation-not-allowed') return 'This sign-in method is not enabled in the Firebase project yet.'
     if (code === 'auth/unauthorized-domain') return 'This website address is not authorized in Firebase Authentication settings.'
-    return 'We could not complete that request. Check your connection and try again.'
+    return code ? `Sign-in failed (${code}). Check the Firebase Authentication settings for this project.` : 'We could not complete that request. Check your connection and try again.'
   }
 
   const submitAuthForm = async (event: FormEvent) => {
