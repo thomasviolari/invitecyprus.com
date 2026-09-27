@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/login", "destination": "/" },
+    { "source": "/invitations", "destination": "/" },
+    { "source": "/invitations/:path*", "destination": "/" },
+    { "source": "/invite/:token", "destination": "/" }
+  ]
+}

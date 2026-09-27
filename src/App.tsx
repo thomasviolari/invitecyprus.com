@@ -10,9 +10,33 @@ import { useUserInvitations } from './useUserInvitations'
 
 type ScheduleItem = { id: number; title: string; time: string; place: string; mapsUrl?: string }
 type GuestGroup = { id: string; name: string; count: number; rsvp?: 'pending' | 'attending' | 'declined'; guestsComing?: number; invitationSent?: boolean; sentVia?: string }
-type Invite = { id: number; title: string; type: string; date: string; dateInput?: string; timeInput?: string; place: string; mapsUrl?: string; coverImage?: string; coverImagePosition?: { x: number; y: number; zoom: number }; guests: number; guestNames: string[]; guestGroups?: GuestGroup[]; tables: { name: string; guests: string[] }[]; schedule: ScheduleItem[]; shareToken?: string; shareMessage?: string }
+type Invite = { id: number; guid: string; title: string; type: string; date: string; dateInput?: string; timeInput?: string; place: string; mapsUrl?: string; coverImage?: string; coverImagePosition?: { x: number; y: number; zoom: number }; guests: number; guestNames: string[]; guestGroups?: GuestGroup[]; tables: { name: string; guests: string[] }[]; schedule: ScheduleItem[]; shareToken?: string; shareMessage?: string }
 type Screen = 'login' | 'home' | 'create' | 'manage' | 'invitation-dashboard' | 'guest-management' | 'seating-management'
+type AppRoute = { screen: Screen; guid?: string; explicit: boolean }
 type SavedUi = { screen?: Screen; step?: number; kind?: string; title?: string; date?: string; time?: string; place?: string; mapsUrl?: string; guestGroups?: GuestGroup[]; guestText?: string; guestCount?: string; scheduleItems?: ScheduleItem[]; editingId?: number | null; manageId?: number | null; manageMode?: 'guests' | 'seating' | null; newGuest?: string; newGuestCount?: string; newTable?: string }
+const parseAppRoute = (pathname: string): AppRoute => {
+  if (pathname === '/login') return { screen: 'login', explicit: true }
+  if (pathname === '/invitations') return { screen: 'manage', explicit: true }
+  if (pathname === '/invitations/new') return { screen: 'create', explicit: true }
+  const match = pathname.match(/^\/invitations\/([0-9a-fA-F-]{36})(?:\/(edit|guests|seating))?\/?$/)
+  if (match) return {
+    screen: match[2] === 'edit' ? 'create' : match[2] === 'guests' ? 'guest-management' : match[2] === 'seating' ? 'seating-management' : 'invitation-dashboard',
+    guid: decodeURIComponent(match[1]),
+    explicit: true,
+  }
+  if (pathname === '/') return { screen: 'home', explicit: false }
+  return { screen: 'home', explicit: true }
+}
+const pathForScreen = (screen: Screen, guid?: string) => {
+  if (screen === 'login') return '/login'
+  if (screen === 'home') return '/'
+  if (screen === 'manage') return '/invitations'
+  if (screen === 'create') return guid ? `/invitations/${encodeURIComponent(guid)}/edit` : '/invitations/new'
+  if (!guid) return '/invitations'
+  if (screen === 'guest-management') return `/invitations/${encodeURIComponent(guid)}/guests`
+  if (screen === 'seating-management') return `/invitations/${encodeURIComponent(guid)}/seating`
+  return `/invitations/${encodeURIComponent(guid)}`
+}
 const readSavedUi = (key = 'invitecyprus-demo-ui'): SavedUi => {
   try { return JSON.parse(localStorage.getItem(key) ?? '{}') as SavedUi } catch { return {} }
 }
@@ -162,13 +186,19 @@ function App() {
   const [authMessage, setAuthMessage] = useState('')
   const [paymentNoticeOpen, setPaymentNoticeOpen] = useState(false)
   const welcomedUid = useRef<string | null>(null)
+  const resolvedPath = useRef<string | null>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [profileEmail, setProfileEmail] = useState('')
   const [profileDraftName, setProfileDraftName] = useState('')
   const [profileDraftEmail, setProfileDraftEmail] = useState('')
   const [profileSaved, setProfileSaved] = useState(false)
-  const transitionTo = (nextScreen: Screen) => {
+  const transitionTo = (nextScreen: Screen, targetGuid?: string | null) => {
+    const selectedInvite = invites?.find((invite) => invite.id === (editingId ?? manageId))
+    const guid = targetGuid === undefined ? selectedInvite?.guid : targetGuid ?? undefined
+    const nextPath = pathForScreen(nextScreen, guid)
+    if (window.location.pathname !== nextPath) window.history.pushState({}, '', nextPath)
+    resolvedPath.current = nextPath
     if (nextScreen === screen) return
     setProfileMenuOpen(false)
     if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -299,6 +329,10 @@ function App() {
       setAuthPassword('')
       if (!user) {
         welcomedUid.current = null
+        if (window.location.pathname === '/') {
+          window.history.replaceState({}, '', '/login')
+          resolvedPath.current = '/login'
+        }
         setScreen('login')
         return
       }
@@ -324,7 +358,12 @@ function App() {
       setNewGuest(userUi.newGuest ?? '')
       setNewGuestCount(userUi.newGuestCount ?? '1')
       setNewTable(userUi.newTable ?? '')
-      setScreen(userUi.screen && userUi.screen !== 'login' ? userUi.screen : 'home')
+      const currentRoute = parseAppRoute(window.location.pathname)
+      if (currentRoute.screen === 'login' && currentRoute.explicit) {
+        window.history.replaceState({}, '', '/')
+        resolvedPath.current = '/'
+      }
+      setScreen(currentRoute.explicit && currentRoute.screen !== 'login' ? currentRoute.screen : 'home')
     })
   }, [])
 
@@ -424,10 +463,17 @@ function App() {
   const logOut = async () => {
     if (!firebaseAuth || localPreviewMode) {
       setLocalPreviewMode(false)
+      window.history.replaceState({}, '', '/login')
+      resolvedPath.current = '/login'
       setScreen('login')
       return
     }
-    try { await signOut(firebaseAuth) } catch { setNotice('Could not log out. Please try again.') }
+    try {
+      await signOut(firebaseAuth)
+      window.history.replaceState({}, '', '/login')
+      resolvedPath.current = '/login'
+      setScreen('login')
+    } catch { setNotice('Could not log out. Please try again.') }
   }
 
   const enterLocalPreview = () => {
@@ -455,7 +501,11 @@ function App() {
     setNewGuest(userUi.newGuest ?? savedUi.newGuest ?? '')
     setNewGuestCount(userUi.newGuestCount ?? savedUi.newGuestCount ?? '1')
     setNewTable(userUi.newTable ?? savedUi.newTable ?? '')
-    setScreen(userUi.screen && userUi.screen !== 'login' ? userUi.screen : 'home')
+    if (window.location.pathname === '/login') {
+      window.history.replaceState({}, '', '/')
+      resolvedPath.current = '/'
+    }
+    setScreen('home')
   }
 
   const create = () => {
@@ -470,7 +520,7 @@ function App() {
     const totalGuests = normalizedGroups.reduce((total, group) => total + group.count, 0)
     const normalizedSchedule = scheduleItems.map((item) => ({ ...item, time: normalizeTime(item.time) }))
     const scheduleLocation = normalizedSchedule.find((item) => item.place.trim())?.place.trim()
-    setInvites((all) => editingId ? all.map((invite) => invite.id === editingId ? { ...invite, title: title || `${kind} invitation`, type: kind, date: date ? formattedDate : invite.date, dateInput: date || invite.dateInput, timeInput: '', place: place || invite.place, mapsUrl, guests: totalGuests, guestNames: names, guestGroups: normalizedGroups, tables: invite.tables.map((table) => ({ ...table, guests: table.guests.filter((guest) => names.includes(guest)) })), schedule: normalizedSchedule } : invite) : [{ id: Date.now(), title: title || `${kind} invitation`, type: kind, date: formattedDate, dateInput: date, timeInput: '', place: scheduleLocation || 'See event-day schedule for location details', mapsUrl: '', guests: totalGuests, guestNames: names, guestGroups: normalizedGroups, tables: [], schedule: normalizedSchedule }, ...all])
+    setInvites((all) => editingId ? all.map((invite) => invite.id === editingId ? { ...invite, title: title || `${kind} invitation`, type: kind, date: date ? formattedDate : invite.date, dateInput: date || invite.dateInput, timeInput: '', place: place || invite.place, mapsUrl, guests: totalGuests, guestNames: names, guestGroups: normalizedGroups, tables: invite.tables.map((table) => ({ ...table, guests: table.guests.filter((guest) => names.includes(guest)) })), schedule: normalizedSchedule } : invite) : [{ id: Date.now(), guid: crypto.randomUUID(), title: title || `${kind} invitation`, type: kind, date: formattedDate, dateInput: date, timeInput: '', place: scheduleLocation || 'See event-day schedule for location details', mapsUrl: '', guests: totalGuests, guestNames: names, guestGroups: normalizedGroups, tables: [], schedule: normalizedSchedule }, ...all])
     transitionTo(editingId ? 'invitation-dashboard' : 'manage')
     setStep(1); setKind('Wedding'); setTitle(''); setDate(''); setTime(''); setPlace(''); setMapsUrl(''); setGuestGroups([makeGuestGroup()]); setScheduleItems([]); setEditingId(null)
     setNotice('Invitation saved. You can keep editing it whenever you’re ready.')
@@ -480,13 +530,13 @@ function App() {
   const openInvitationDashboard = (inviteId: number) => {
     setManageId(inviteId)
     setManageMode(null)
-    transitionTo('invitation-dashboard')
+    transitionTo('invitation-dashboard', invites.find((invite) => invite.id === inviteId)?.guid)
   }
 
   const openManageMode = (inviteId: number, mode: 'guests' | 'seating') => {
     setManageId(inviteId)
     setManageMode(null)
-    transitionTo(mode === 'guests' ? 'guest-management' : 'seating-management')
+    transitionTo(mode === 'guests' ? 'guest-management' : 'seating-management', invites.find((invite) => invite.id === inviteId)?.guid)
   }
 
   const back = () => {
@@ -496,8 +546,13 @@ function App() {
     else transitionTo('home')
   }
 
+  const loadInviteForEditing = (invite: Invite) => {
+    setManageId(invite.id); setEditingId(invite.id); setKind(invite.type); setTitle(invite.title); setPlace(invite.place === 'Place to be decided' ? '' : invite.place); setMapsUrl(invite.mapsUrl ?? ''); setGuestGroups(guestGroupsForInvite(invite)); setScheduleItems(sortScheduleItemsChronologically(invite.schedule ?? [])); setDate(invite.dateInput ?? ''); setTime(''); setStep(2)
+  }
+
   const editInvite = (invite: Invite) => {
-    setManageId(invite.id); setEditingId(invite.id); setKind(invite.type); setTitle(invite.title); setPlace(invite.place === 'Place to be decided' ? '' : invite.place); setMapsUrl(invite.mapsUrl ?? ''); setGuestGroups(guestGroupsForInvite(invite)); setScheduleItems(sortScheduleItemsChronologically(invite.schedule ?? [])); setDate(invite.dateInput ?? ''); setTime(''); setStep(2); transitionTo('create')
+    loadInviteForEditing(invite)
+    transitionTo('create', invite.guid)
   }
 
   const addScheduleItem = (itemTitle: string) => {
@@ -546,7 +601,7 @@ function App() {
   }
 
   const startNewInvitation = () => {
-    setEditingId(null); setKind('Wedding'); setTitle(''); setDate(''); setTime(''); setPlace(''); setMapsUrl(''); setGuestGroups([makeGuestGroup()]); setScheduleItems([]); setStep(1); transitionTo('create')
+    setEditingId(null); setKind('Wedding'); setTitle(''); setDate(''); setTime(''); setPlace(''); setMapsUrl(''); setGuestGroups([makeGuestGroup()]); setScheduleItems([]); setStep(1); transitionTo('create', null)
   }
 
   const addGuest = () => {
@@ -978,6 +1033,59 @@ function App() {
   const visibleUnseatedGuests = unseatedAttendingGuests.filter((group) => group.name.toLowerCase().includes(unseatedGuestSearch.trim().toLowerCase()))
   const coverBeingEdited = invites.find((invite) => invite.id === coverEditorId)
   const invitationToDelete = invites.find((invite) => invite.id === deleteConfirmId)
+
+  useEffect(() => {
+    const resolveBrowserLocation = (fromPopState = false) => {
+      const pathname = window.location.pathname
+      if (!fromPopState && resolvedPath.current === pathname) return
+      if (access !== 'open') return
+      const route = parseAppRoute(pathname)
+      if (pathname === '/' && !fromPopState) return
+      if (route.screen === 'login') {
+        setScreen('login')
+        resolvedPath.current = pathname
+        return
+      }
+      if (!invitationOwner) {
+        setScreen('login')
+        return
+      }
+      if (route.guid) {
+        if (invitationsLoading) return
+        const invite = invites.find((candidate) => candidate.guid === route.guid)
+        if (!invite) {
+          window.history.replaceState({}, '', '/invitations')
+          resolvedPath.current = '/invitations'
+          setManageId(null)
+          setEditingId(null)
+          setScreen('manage')
+          return
+        }
+        setManageId(invite.id)
+        setManageMode(route.screen === 'guest-management' ? 'guests' : route.screen === 'seating-management' ? 'seating' : null)
+        if (route.screen === 'create') loadInviteForEditing(invite)
+        else setEditingId(null)
+      } else {
+        setEditingId(null)
+        setManageMode(null)
+        if (route.screen === 'create') { setManageId(null); setStep(1) }
+      }
+      setScreen(route.screen)
+      resolvedPath.current = pathname
+      if (!route.explicit) {
+        window.history.replaceState({}, '', pathForScreen(route.screen))
+        resolvedPath.current = window.location.pathname
+      }
+    }
+
+    const onPopState = () => {
+      resolvedPath.current = null
+      resolveBrowserLocation(true)
+    }
+    window.addEventListener('popstate', onPopState)
+    resolveBrowserLocation()
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [access, invitationOwner, invitationsLoading, invites])
   const invitationToPreview = invites.find((invite) => invite.id === previewInviteId)
   const invitationToShare = invites.find((invite) => invite.id === shareInvitationId)
   const invitationShareUrl = invitationToShare?.shareToken ? `${window.location.origin}/invite/${invitationToShare.shareToken}` : ''

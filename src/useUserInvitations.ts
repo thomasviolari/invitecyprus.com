@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react'
-import { collection, doc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { collection, doc, onSnapshot, runTransaction, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore'
 import { getDownloadURL, ref, uploadString } from 'firebase/storage'
 import { firebaseDb, firebaseStorage } from './firebase'
 
-type InvitationRecord = { id: number; coverImage?: string; shareToken?: string; shareMessage?: string; title?: string; type?: string; date?: string; dateInput?: string; place?: string; guests?: number; guestNames?: string[]; guestGroups?: { id: string; name: string; count: number; rsvp?: string; guestsComing?: number }[]; schedule?: unknown[]; tables?: { name: string; guests: string[] }[] }
+type InvitationRecord = { id: number; guid?: string; coverImage?: string; shareToken?: string; shareMessage?: string; title?: string; type?: string; date?: string; dateInput?: string; place?: string; guests?: number; guestNames?: string[]; guestGroups?: { id: string; name: string; count: number; rsvp?: string; guestsComing?: number }[]; schedule?: unknown[]; tables?: { name: string; guests: string[] }[] }
 type GuestResponse = { rsvp?: 'pending' | 'attending' | 'declined'; guestsComing?: number }
 
 const firestoreSafe = (value: unknown): unknown => {
@@ -15,6 +15,7 @@ const firestoreSafe = (value: unknown): unknown => {
 }
 
 const localInvitationsKey = (ownerId: string) => `invitecyprus-user-${ownerId}-invitations`
+const addMissingGuids = <T extends InvitationRecord>(invites: T[]) => invites.map((invite) => invite.guid ? invite : { ...invite, guid: crypto.randomUUID() })
 const groupsForShare = (invite: InvitationRecord) => {
   if (invite.guestGroups) return invite.guestGroups
   const groups = (invite.guestNames ?? []).map((name, index) => ({ id: `legacy-${invite.id}-${index}`, name, count: 1 }))
@@ -72,13 +73,14 @@ const compactImageData = async (dataUrl: string) => {
 }
 
 const prepareInvitation = async <T extends InvitationRecord>(invite: T, ownerId: string): Promise<T> => {
-  if (!invite.coverImage?.startsWith('data:')) return invite
+  const withGuid = invite.guid ? invite : { ...invite, guid: crypto.randomUUID() }
+  if (!withGuid.coverImage?.startsWith('data:')) return withGuid
   if (firebaseStorage) {
-    const imageRef = ref(firebaseStorage, `users/${ownerId}/covers/${invite.id}.jpg`)
-    await uploadString(imageRef, invite.coverImage, 'data_url', { contentType: 'image/jpeg' })
-    return { ...invite, coverImage: await getDownloadURL(imageRef) }
+    const imageRef = ref(firebaseStorage, `users/${ownerId}/covers/${withGuid.id}.jpg`)
+    await uploadString(imageRef, withGuid.coverImage, 'data_url', { contentType: 'image/jpeg' })
+    return { ...withGuid, coverImage: await getDownloadURL(imageRef) }
   }
-  return { ...invite, coverImage: await compactImageData(invite.coverImage) }
+  return { ...withGuid, coverImage: await compactImageData(withGuid.coverImage) }
 }
 
 export function useUserInvitations<T extends InvitationRecord>(ownerId: string | null) {
@@ -107,12 +109,13 @@ export function useUserInvitations<T extends InvitationRecord>(ownerId: string |
     }
 
     if (ownerId === 'local-preview') {
-      const local = readLocalInvitations<T>(ownerId)
+      const local = addMissingGuids(readLocalInvitations<T>(ownerId))
       let invites = local
       if (!invites.length) {
-        try { invites = JSON.parse(localStorage.getItem('invitecyprus-demo-invitations') ?? '[]') as T[] }
+        try { invites = addMissingGuids(JSON.parse(localStorage.getItem('invitecyprus-demo-invitations') ?? '[]') as T[]) }
         catch { invites = [] }
       }
+      try { localStorage.setItem(localInvitationsKey(ownerId), JSON.stringify(invites)) } catch { /* Preview remains usable for this session. */ }
       latestInvites.current = invites
       setInvitesState(invites)
       setLoadedOwner(ownerId)
@@ -151,6 +154,13 @@ export function useUserInvitations<T extends InvitationRecord>(ownerId: string |
       }
       const next = snapshot.docs.map((invitation) => {
         const invite = invitation.data() as T
+        if (!invite.guid) {
+          const guid = crypto.randomUUID()
+          void updateDoc(invitation.ref, { guid }).catch((migrationError: unknown) => {
+            if (active) setError(migrationError instanceof Error ? migrationError.message : 'Could not add a stable invitation link.')
+          })
+          invite.guid = guid
+        }
         const responses = invite.shareToken ? responseCache.current.get(invite.shareToken) : undefined
         if (!responses || !invite.guestGroups) return invite
         return { ...invite, guestGroups: invite.guestGroups.map((group) => ({ ...group, ...responses.get(group.id) })) }

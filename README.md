@@ -33,3 +33,7 @@ Each account's invitations are stored at `users/{uid}/invitations/{invitationId}
 After logging in, the host sees a one-time-per-session notice that the service is free for a limited time; payment options are shown as unavailable. From an invitation dashboard, **Send invitation link** creates a share URL and opens a message editor. The copy action includes the optional message, event link, and a note telling guests where to find seating arrangements on the wedding day.
 
 When a signed-in account first connects to Firestore, invitations previously saved in that browser under its Firebase UID are copied to the cloud. Keep that browser data until the migration has completed successfully; if the account already has cloud invitations, cloud data is used and local data is not merged automatically.
+
+## App routes
+
+The host app supports direct routes for `/login`, `/invitations`, `/invitations/new`, `/invitations/{guid}`, `/invitations/{guid}/edit`, `/invitations/{guid}/guests`, and `/invitations/{guid}/seating`. Invitation URLs use a persistent UUID `guid`; the existing numeric `id` remains an internal storage key. Existing invitations receive a GUID the first time they load. Vercel rewrites these paths to the app entry point so refresh and direct links work.
