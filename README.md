@@ -1,4 +1,5 @@
 # invitecyprus.com
+
 ## Local preview password
 
 The Vite development preview asks for a password before showing the app. Create a `.env.local` file in the project root and add:
