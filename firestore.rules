@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/invitations/{invitationId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /publicInvitations/{token} {
+      function ownerInvitationPath(ownerId, invitationId) {
+        return /databases/$(database)/documents/users/$(ownerId)/invitations/$(invitationId);
+      }
+
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && getAfter(ownerInvitationPath(request.auth.uid, request.resource.data.invitationId)).data.shareToken == token;
+      allow delete: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid
+        && get(ownerInvitationPath(request.auth.uid, resource.data.invitationId)).data.shareToken == token;
+
+      match /responses/{groupId} {
+        function linkedInvite() {
+          return get(/databases/$(database)/documents/publicInvitations/$(token)).data;
+        }
+
+        function validResponse() {
+          return request.resource.data.keys().hasOnly(['rsvp', 'guestsComing', 'respondedAt'])
+            && request.resource.data.keys().hasAll(['rsvp', 'guestsComing'])
+            && request.resource.data.rsvp in ['pending', 'attending', 'declined']
+            && request.resource.data.guestsComing is int
+            && request.resource.data.guestsComing >= 0
+            && request.resource.data.guestsComing <= linkedInvite().guestGroupCounts[groupId]
+            && ((request.resource.data.rsvp == 'declined' && request.resource.data.guestsComing == 0)
+              || (request.resource.data.rsvp == 'attending' && request.resource.data.guestsComing >= 1)
+              || (request.resource.data.rsvp == 'pending' && request.resource.data.guestsComing >= 0));
+        }
+
+        allow read: if exists(/databases/$(database)/documents/publicInvitations/$(token));
+        allow create, update: if existsAfter(/databases/$(database)/documents/publicInvitations/$(token))
+          && validResponse();
+        allow delete: if request.auth != null && request.auth.uid == linkedInvite().ownerUid;
+      }
+
+      match /seating/{planId} {
+        function linkedInvite() {
+          return get(/databases/$(database)/documents/publicInvitations/$(token)).data;
+        }
+
+        function linkedInviteAfter() {
+          return getAfter(/databases/$(database)/documents/publicInvitations/$(token)).data;
+        }
+
+        allow read: if exists(/databases/$(database)/documents/publicInvitations/$(token))
+          && (request.auth != null && request.auth.uid == linkedInvite().ownerUid
+          || request.time >= linkedInvite().seatingVisibleAt);
+        allow write: if request.auth != null && request.auth.uid == linkedInviteAfter().ownerUid;
+      }
+  }
+}

@@ -70,6 +70,8 @@ export default async function middleware(request: Request): Promise<Response> {
   const password = process.env.INVITECYPRUS_ACCESS_PASSWORD ?? ''
   const url = new URL(request.url)
 
+  if (/^\/invite\/[A-Za-z0-9-]+\/?$/.test(url.pathname) || url.pathname.startsWith('/assets/')) return next()
+
   if (url.pathname === ACCESS_PATH) {
     if (!password) return json({ configured: false, authorized: false }, 503)
     if (request.method === 'GET') return json({ configured: true, authorized: await hasValidSession(request, password) })

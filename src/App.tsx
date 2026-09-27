@@ -1,13 +1,16 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { createUserWithEmailAndPassword, FacebookAuthProvider, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, GoogleAuthProvider, type User } from 'firebase/auth'
-import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleUserRound, Clock3, Crop, CreditCard, Download, ExternalLink, Eye, FileSpreadsheet, ImagePlus, LockKeyhole, LogOut, MapPin, Plus, QrCode, Save, Shuffle, Trash2, Users, X } from 'lucide-react'
-import { firebaseAuth, firebaseConfigured } from './firebase'
+import { getDownloadURL, ref, uploadString } from 'firebase/storage'
+import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleUserRound, Clock3, Copy, Crop, CreditCard, Download, ExternalLink, Eye, FileSpreadsheet, ImagePlus, LockKeyhole, LogOut, MapPin, Plus, QrCode, Save, Share2, Shuffle, Trash2, Users, X } from 'lucide-react'
+import { firebaseAuth, firebaseConfigured, firebaseDb, firebaseStorage } from './firebase'
 import MobileGuestListPortal from './MobileGuestListPortal'
+import InvitationShareAction from './InvitationShareAction'
+import { useUserInvitations } from './useUserInvitations'
 
 type ScheduleItem = { id: number; title: string; time: string; place: string; mapsUrl?: string }
-type GuestGroup = { id: string; name: string; count: number; rsvp?: 'pending' | 'attending' | 'declined'; invitationSent?: boolean; sentVia?: string }
-type Invite = { id: number; title: string; type: string; date: string; dateInput?: string; timeInput?: string; place: string; mapsUrl?: string; coverImage?: string; coverImagePosition?: { x: number; y: number; zoom: number }; guests: number; guestNames: string[]; guestGroups?: GuestGroup[]; tables: { name: string; guests: string[] }[]; schedule: ScheduleItem[] }
+type GuestGroup = { id: string; name: string; count: number; rsvp?: 'pending' | 'attending' | 'declined'; guestsComing?: number; invitationSent?: boolean; sentVia?: string }
+type Invite = { id: number; title: string; type: string; date: string; dateInput?: string; timeInput?: string; place: string; mapsUrl?: string; coverImage?: string; coverImagePosition?: { x: number; y: number; zoom: number }; guests: number; guestNames: string[]; guestGroups?: GuestGroup[]; tables: { name: string; guests: string[] }[]; schedule: ScheduleItem[]; shareToken?: string; shareMessage?: string }
 type Screen = 'login' | 'home' | 'create' | 'manage' | 'invitation-dashboard' | 'guest-management' | 'seating-management'
 type SavedUi = { screen?: Screen; step?: number; kind?: string; title?: string; date?: string; time?: string; place?: string; mapsUrl?: string; guestGroups?: GuestGroup[]; guestText?: string; guestCount?: string; scheduleItems?: ScheduleItem[]; editingId?: number | null; manageId?: number | null; manageMode?: 'guests' | 'seating' | null; newGuest?: string; newGuestCount?: string; newTable?: string }
 const readSavedUi = (key = 'invitecyprus-demo-ui'): SavedUi => {
@@ -21,7 +24,10 @@ const guestGroupsForInvite = (invite: Invite): GuestGroup[] => {
   if (remaining > 0) groups.push({ id: `legacy-${invite.id}-additional`, name: 'Additional guests', count: remaining })
   return groups
 }
-const peopleSeatedAtTable = (invite: Invite, table: { name: string; guests: string[] }) => table.guests.reduce((total, name) => total + (guestGroupsForInvite(invite).find((group) => group.name === name)?.count ?? 1), 0)
+const peopleSeatedAtTable = (invite: Invite, table: { name: string; guests: string[] }) => table.guests.reduce((total, name) => {
+  const group = guestGroupsForInvite(invite).find((candidate) => candidate.name === name)
+  return total + (group?.rsvp === 'attending' ? group.guestsComing ?? group.count : group?.count ?? 1)
+}, 0)
 const isInviteCompleted = (invite: Invite) => {
   if (!invite.dateInput) return false
   const [year, month, day] = invite.dateInput.split('-').map(Number)
@@ -154,7 +160,8 @@ function App() {
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
   const [authMessage, setAuthMessage] = useState('')
-  const [inviteOwner, setInviteOwner] = useState<string | null>(null)
+  const [paymentNoticeOpen, setPaymentNoticeOpen] = useState(false)
+  const welcomedUid = useRef<string | null>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [profileEmail, setProfileEmail] = useState('')
@@ -194,7 +201,8 @@ function App() {
       setNotice('Could not save your profile. Please try again.')
     }
   }
-  const [invites, setInvites] = useState<Invite[]>([])
+  const invitationOwner = authUser?.uid ?? (localPreviewMode ? 'local-preview' : null)
+  const { invites, setInvites, waitForSync, loading: invitationsLoading, error: invitationsError } = useUserInvitations<Invite>(invitationOwner)
   const [step, setStep] = useState(savedUi.step ?? 1)
   const [kind, setKind] = useState(savedUi.kind ?? 'Wedding')
   const [title, setTitle] = useState(savedUi.title ?? '')
@@ -228,6 +236,10 @@ function App() {
   const [coverEditorId, setCoverEditorId] = useState<number | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
   const [previewInviteId, setPreviewInviteId] = useState<number | null>(null)
+  const [shareInvitationId, setShareInvitationId] = useState<number | null>(null)
+  const [shareMessageDraft, setShareMessageDraft] = useState('')
+  const [shareLinkReady, setShareLinkReady] = useState(false)
+  const [shareLinkError, setShareLinkError] = useState('')
 
   const clearFieldError = (key: string) => setFieldErrors((errors) => {
     if (!errors[key]) return errors
@@ -286,18 +298,17 @@ function App() {
       setProfileMenuOpen(false)
       setAuthPassword('')
       if (!user) {
+        welcomedUid.current = null
         setScreen('login')
-        setInvites([])
-        setInviteOwner(null)
         return
+      }
+      if (welcomedUid.current !== user.uid) {
+        welcomedUid.current = user.uid
+        const noticeKey = `invitecyprus-payment-notice-${user.uid}`
+        if (!sessionStorage.getItem(noticeKey)) setPaymentNoticeOpen(true)
       }
       const uiKey = `invitecyprus-user-${user.uid}-ui`
       const userUi = readSavedUi(uiKey)
-      try {
-        const savedInvites = localStorage.getItem(`invitecyprus-user-${user.uid}-invitations`)
-        setInvites(savedInvites ? JSON.parse(savedInvites) as Invite[] : [])
-      } catch { setInvites([]) }
-      setInviteOwner(user.uid)
       setStep(userUi.step ?? 1)
       setKind(userUi.kind ?? 'Wedding')
       setTitle(userUi.title ?? '')
@@ -335,12 +346,6 @@ function App() {
       localStorage.setItem(ownerId === 'local-preview' ? 'invitecyprus-user-local-preview-ui' : `invitecyprus-user-${ownerId}-ui`, JSON.stringify({ screen, step, kind, title, date, time, place, mapsUrl, guestGroups, scheduleItems, editingId, manageId, manageMode, newGuest, newGuestCount, newTable } satisfies SavedUi))
     } catch { /* Storage may be disabled; keep the app usable for this session. */ }
   }, [authUser, localPreviewMode, screen, step, kind, title, date, time, place, mapsUrl, guestGroups, scheduleItems, editingId, manageId, manageMode, newGuest, newGuestCount, newTable])
-
-  useEffect(() => {
-    const ownerId = authUser?.uid ?? (localPreviewMode ? 'local-preview' : null)
-    if (!ownerId || inviteOwner !== ownerId) return
-    try { localStorage.setItem(`invitecyprus-user-${ownerId}-invitations`, JSON.stringify(invites)) } catch { /* Storage may be full or disabled. */ }
-  }, [authUser, localPreviewMode, inviteOwner, invites])
 
   const authErrorMessage = (error: unknown) => {
     const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
@@ -415,8 +420,6 @@ function App() {
   const logOut = async () => {
     if (!firebaseAuth || localPreviewMode) {
       setLocalPreviewMode(false)
-      setInviteOwner(null)
-      setInvites([])
       setScreen('login')
       return
     }
@@ -425,6 +428,7 @@ function App() {
 
   const enterLocalPreview = () => {
     const ownerId = 'local-preview'
+    if (!sessionStorage.getItem('invitecyprus-payment-notice-local-preview')) setPaymentNoticeOpen(true)
     const userUi = readSavedUi(`invitecyprus-user-${ownerId}-ui`)
     setLocalPreviewMode(true)
     setProfileName('Preview host')
@@ -432,13 +436,6 @@ function App() {
     setProfileEmail('local-preview@invitecyprus.test')
     setProfileDraftEmail('local-preview@invitecyprus.test')
     setProfileMenuOpen(false)
-    setInvites(() => {
-      try {
-        const saved = localStorage.getItem(`invitecyprus-user-${ownerId}-invitations`) ?? localStorage.getItem('invitecyprus-demo-invitations')
-        return saved ? JSON.parse(saved) as Invite[] : []
-      } catch { return [] }
-    })
-    setInviteOwner(ownerId)
     setStep(userUi.step ?? savedUi.step ?? 1)
     setKind(userUi.kind ?? savedUi.kind ?? 'Wedding')
     setTitle(userUi.title ?? savedUi.title ?? '')
@@ -627,7 +624,12 @@ function App() {
     if (!file.type.startsWith('image/')) { setNotice('Choose an image file to use as the cover.'); return }
     if (file.size > 12 * 1024 * 1024) { setNotice('Choose an image smaller than 12 MB.'); return }
     try {
-      const coverImage = await compressCoverImage(file)
+      let coverImage = await compressCoverImage(file)
+      if (authUser && firebaseStorage) {
+        const imageRef = ref(firebaseStorage, `users/${authUser.uid}/covers/${inviteId}.jpg`)
+        await uploadString(imageRef, coverImage, 'data_url', { contentType: 'image/jpeg' })
+        coverImage = await getDownloadURL(imageRef)
+      }
       setInvites((all) => all.map((invite) => invite.id === inviteId ? { ...invite, coverImage, coverImagePosition: { x: 50, y: 50, zoom: 100 } } : invite))
       setNotice('Cover photo updated.')
     } catch (error) {
@@ -972,11 +974,58 @@ function App() {
   const coverBeingEdited = invites.find((invite) => invite.id === coverEditorId)
   const invitationToDelete = invites.find((invite) => invite.id === deleteConfirmId)
   const invitationToPreview = invites.find((invite) => invite.id === previewInviteId)
+  const invitationToShare = invites.find((invite) => invite.id === shareInvitationId)
+  const invitationShareUrl = invitationToShare?.shareToken ? `${window.location.origin}/invite/${invitationToShare.shareToken}` : ''
+
+  useEffect(() => {
+    if (!shareInvitationId || !invitationToShare?.shareToken) return
+    let active = true
+    setShareLinkReady(false)
+    setShareLinkError('')
+    void waitForSync().then(() => { if (active) setShareLinkReady(true) }).catch((error: unknown) => {
+      if (active) setShareLinkError(error instanceof Error ? error.message : 'Could not publish this invitation link.')
+    })
+    return () => { active = false }
+  }, [shareInvitationId, invitationToShare?.shareToken, waitForSync])
+
+  const openInvitationShare = (invite: Invite) => {
+    if (!authUser || !firebaseDb) {
+      setNotice('Log in with a connected account to publish an invitation link.')
+      window.setTimeout(() => setNotice(''), 4500)
+      return
+    }
+    const shareToken = invite.shareToken ?? crypto.randomUUID()
+    setShareMessageDraft(invite.shareMessage ?? '')
+    setShareLinkError('')
+    setShareInvitationId(invite.id)
+    if (shareToken !== invite.shareToken) {
+      setInvites((all) => all.map((item) => item.id === invite.id ? { ...item, shareToken } : item))
+    }
+  }
+
+  const copyInvitationMessage = async () => {
+    if (!invitationToShare || !invitationShareUrl) return
+    setShareLinkError('')
+    setInvites((all) => all.map((invite) => invite.id === invitationToShare.id ? { ...invite, shareMessage: shareMessageDraft.trim() } : invite))
+    try {
+      await waitForSync()
+      const parts = [shareMessageDraft.trim(), `You’re invited to ${invitationToShare.title} on ${invitationToShare.date}. Please reply here: ${invitationShareUrl}`, 'If seating arrangements are available, you’ll find them at this link on the wedding day.'].filter(Boolean)
+      await navigator.clipboard.writeText(parts.join('\n\n'))
+      setNotice('Invitation message and link copied.')
+      window.setTimeout(() => setNotice(''), 4500)
+    } catch (error) {
+      setShareLinkError(error instanceof Error ? error.message : 'Could not copy the invitation. Copy the link above instead.')
+    }
+  }
 
   if (access !== 'open') return <main className="access-screen"><div className="access-card"><div className="access-brand"><span className="simple-mark"><i/><i/><i/><i/></span>invitecyprus</div><span className="login-icon"><LockKeyhole size={19}/></span><p className="simple-overline">PRIVATE PREVIEW</p><h1>{access === 'checking' ? 'Checking access…' : access === 'setup' ? 'Set up preview access' : 'Enter the password'}</h1>{access === 'setup' ? <p className="access-copy">Create a <code>.env.local</code> file in the project folder and add <code>INVITECYPRUS_ACCESS_PASSWORD=your-password</code>. Restart the dev server to apply it.</p> : access === 'checking' ? <p className="access-copy">One moment while we check this preview.</p> : <form onSubmit={unlockPreview}><p className="access-copy">Enter the preview password to continue.</p><label htmlFor="preview-password">Password</label><input id="preview-password" type="password" autoFocus autoComplete="current-password" value={accessPassword} onChange={(e) => setAccessPassword(e.target.value)} placeholder="Enter preview password" required/><button className="simple-primary full-button" type="submit">Open invitecyprus <ArrowRight size={15}/></button>{accessError && <p className="access-error">{accessError}</p>}</form>}</div></main>
 
+  if (invitationsLoading) return <main className="access-screen"><div className="access-card"><div className="access-brand"><span className="simple-mark"><i/><i/><i/><i/></span>invitecyprus</div><span className="login-icon"><Users size={19}/></span><p className="simple-overline">YOUR INVITATIONS</p><h1>Loading your invitations</h1><p className="access-copy">Syncing this account’s celebrations.</p></div></main>
+  if (invitationsError) return <main className="access-screen"><div className="access-card"><div className="access-brand"><span className="simple-mark"><i/><i/><i/><i/></span>invitecyprus</div><span className="login-icon"><LockKeyhole size={19}/></span><p className="simple-overline">ACCOUNT SYNC</p><h1>Could not load your invitations</h1><p className="access-copy">{invitationsError}</p><button className="simple-primary full-button" onClick={() => window.location.reload()}>Try again <ArrowRight size={15}/></button></div></main>
+
   return <div className="simple-app">
     <header className="simple-header"><button className="simple-brand" onClick={() => transitionTo(screen === 'login' ? 'login' : 'home')}><span className="simple-mark"><i/><i/><i/><i/></span>invitecyprus</button>{screen !== 'login' && <div className="account-menu-wrap" onBlur={(event) => {if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProfileMenuOpen(false)}}><button type="button" className="account-chip" aria-haspopup="dialog" aria-expanded={profileMenuOpen} onClick={() => {setProfileDraftName(profileName);setProfileDraftEmail(profileEmail);setProfileSaved(false);setProfileMenuOpen((open) => !open)}}><span className="account-initial">{profileName.trim().charAt(0).toUpperCase() || 'U'}</span><span>{profileName}</span><ChevronRight size={14}/></button>{profileMenuOpen && <section className="profile-menu" role="dialog" aria-label="Profile settings"><div className="profile-menu-heading"><CircleUserRound size={17}/><span><strong>Profile settings</strong><small>Your account details</small></span></div><div className="profile-settings-fields"><label>Display name<input required value={profileDraftName} onChange={(event) => { setProfileDraftName(event.target.value); clearFieldError('profileDisplayName') }} placeholder="Your name"/>{fieldErrors.profileDisplayName && <small className="field-error">{fieldErrors.profileDisplayName}</small>}</label><label>Email address<input type="email" value={profileDraftEmail} readOnly placeholder="you@example.com"/></label><button className="profile-save-button" onClick={() => void saveProfileSettings()}><Save size={13}/>{profileSaved ? 'Saved' : 'Save changes'}</button></div><div className="profile-payment-section"><button className="profile-payment-disabled" disabled><CreditCard size={16}/><span><strong>Payment options</strong><small>Currently unavailable</small></span></button><p>Invitecyprus is free for a limited time. Payment options will be available later.</p></div><button className="profile-menu-logout" onClick={() => void logOut()}><LogOut size={14}/> Log out</button></section>}</div>}</header>
+    {invitationsError && <p className="auth-feedback auth-feedback-error" role="alert">Invitation sync: {invitationsError}</p>}
 
     {screen === 'login' && <main className="login-layout"><section className="login-welcome"><div className="welcome-art"><div className="art-photo"></div><div className="art-note"><span>✳</span><strong>A little invite.<br/>A lovely big moment.</strong></div><div className="art-circle"></div><div className="art-caption">INVITECYPRUS · CELEBRATE TOGETHER</div></div><div className="login-welcome-copy"><p className="simple-overline">FOR ALL THE MOMENTS THAT MATTER</p><h1>Bring your people<br/>a little closer.</h1><p>Beautiful invitations and easy RSVPs, all in one place.</p></div></section><section className="login-panel"><div className="login-form"><span className="login-icon"><CircleUserRound size={20}/></span><p className="simple-overline">YOUR INVITECYPRUS ACCOUNT</p><h2>{authMode === 'signUp' ? 'Create your account' : 'Welcome back'}</h2><p className="login-sub">{authMode === 'signUp' ? 'A few details, then you can start your invitation.' : 'Log in to create and manage your invitations.'}</p>{!firebaseConfigured && <><p className="auth-setup-note">Firebase sign-in isn’t set up yet. Continue with a local preview while you configure it.</p><button className="simple-primary full-button local-preview-button" type="button" onClick={enterLocalPreview}>Continue in local preview <ArrowRight size={16}/></button></>}<form onSubmit={(event) => void submitAuthForm(event)}>{authMode === 'signUp' && <><label htmlFor="auth-name">Your name</label><input id="auth-name" autoComplete="name" value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="e.g. Emma Wilson" required/></>}<label htmlFor="auth-email">Email address</label><input id="auth-email" type="email" autoComplete="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="you@example.com" required/><label htmlFor="auth-password">Password</label><input id="auth-password" type="password" autoComplete={authMode === 'signUp' ? 'new-password' : 'current-password'} minLength={authMode === 'signUp' ? 8 : undefined} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder={authMode === 'signUp' ? 'At least 8 characters' : 'Enter your password'} required/>{authMode === 'signUp' && <><label htmlFor="auth-password-confirm">Confirm password</label><input id="auth-password-confirm" type="password" autoComplete="new-password" value={authPasswordConfirm} onChange={(event) => setAuthPasswordConfirm(event.target.value)} placeholder="Enter your password again" required/></>}{authMode === 'signIn' && <button className="forgot-link" type="button" onClick={() => void requestPasswordReset()} disabled={authBusy}>Forgot password?</button>}<button className="simple-primary full-button" type="submit" disabled={!firebaseConfigured || !authReady || authBusy}>{authBusy ? 'Please wait…' : authMode === 'signUp' ? 'Create account' : 'Log in'} <ArrowRight size={16}/></button></form>{authError && <p className="auth-feedback auth-feedback-error" role="alert">{authError}</p>}{authMessage && <p className="auth-feedback auth-feedback-success" role="status">{authMessage}</p>}<div className="login-divider"><span></span>or continue with<span></span></div><button className="google-button" type="button" onClick={() => void signInWithProvider('google')} disabled={!firebaseConfigured || !authReady || authBusy}><span>G</span> Continue with Google</button><button className="facebook-button" type="button" onClick={() => void signInWithProvider('facebook')} disabled={!firebaseConfigured || !authReady || authBusy}><span>f</span> Continue with Facebook</button><p className="signup-line">{authMode === 'signUp' ? 'Already have an account?' : 'New to invitecyprus?'} <button type="button" onClick={() => {setAuthMode(authMode === 'signUp' ? 'signIn' : 'signUp');setAuthError('');setAuthMessage('')}}>{authMode === 'signUp' ? 'Log in' : 'Create an account'}</button></p><p className="privacy-line"><LockKeyhole size={12}/> Your guests won’t need an account to RSVP.</p></div></section></main>}
 
@@ -1007,6 +1056,9 @@ function App() {
     <footer className="simple-footer"><span>invitecyprus <span>Made for life’s lovely moments.</span></span><span>Need a hand? &nbsp; Privacy</span></footer>
     {notice && <div className="simple-toast"><Check size={16}/>{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}><X size={14}/></button></div>}
     <MobileGuestListPortal active={screen === 'guest-management' && Boolean(managedInvite)} groups={filteredGuestGroups} channels={invitationChannels} onSave={updateManagedGuestGroup} onRemove={removeGuest}/>
+    <InvitationShareAction active={screen === 'invitation-dashboard' && Boolean(managedInvite)} onClick={() => { if (managedInvite) openInvitationShare(managedInvite) }}/>
+    {invitationToShare && <div className="simple-modal-backdrop invitation-share-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShareInvitationId(null) }}><section className="invitation-share-modal" role="dialog" aria-modal="true" aria-labelledby="invitation-share-title"><button type="button" className="people-close" aria-label="Close invitation link" onClick={() => setShareInvitationId(null)}><X size={18}/></button><span className="invitation-share-icon"><Share2 size={20}/></span><p className="simple-overline">SHARE YOUR CELEBRATION</p><h2 id="invitation-share-title">Send an invitation link</h2><p className="invitation-share-description">Add a personal note if you like. The link opens a private invitation page where each guest can reply.</p><label className="invitation-share-field"><span>Your message <small>Optional</small></span><textarea value={shareMessageDraft} onChange={(event) => setShareMessageDraft(event.target.value)} placeholder="Write a note for your guests…" rows={4}/></label><label className="invitation-share-field"><span>Invitation link</span><input readOnly value={invitationShareUrl} aria-label="Invitation link"/></label><p className="invitation-share-seat-note"><Users size={15}/> If seating arrangements are available, guests will find them at this link on the wedding day.</p>{shareLinkError && <p className="auth-feedback auth-feedback-error" role="alert">{shareLinkError}</p>}<button type="button" className="simple-primary invitation-share-copy" disabled={!shareLinkReady} onClick={() => void copyInvitationMessage()}>{shareLinkReady ? <><Copy size={16}/> Copy message and link</> : 'Preparing secure invitation link…'}</button></section></div>}
+    {paymentNoticeOpen && <div className="simple-modal-backdrop payment-notice-backdrop"><section className="payment-notice-modal" role="dialog" aria-modal="true" aria-labelledby="payment-notice-title"><span className="payment-notice-icon"><CreditCard size={21}/></span><p className="simple-overline">A NOTE FROM INVITECYPRUS</p><h2 id="payment-notice-title">Enjoy it while it’s free</h2><p>Invitecyprus is free for a limited time. We’ll let you know before any paid plans become available.</p><div className="payment-notice-options"><CreditCard size={18}/><span><strong>Payment options</strong><small>Not available yet</small></span><span className="payment-notice-status">Coming later</span></div><button className="simple-primary" onClick={() => { sessionStorage.setItem(`invitecyprus-payment-notice-${authUser?.uid ?? 'local-preview'}`, 'dismissed'); setPaymentNoticeOpen(false) }}>Continue to my invitations <ArrowRight size={16}/></button></section></div>}
   </div>
 }
 export default App
