@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { createUserWithEmailAndPassword, FacebookAuthProvider, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile, GoogleAuthProvider, type User } from 'firebase/auth'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleUserRound, Clock3, Crop, CreditCard, Download, ExternalLink, Eye, FileSpreadsheet, ImagePlus, LockKeyhole, LogOut, MapPin, Plus, QrCode, Save, Shuffle, Trash2, Users, X } from 'lucide-react'
 import { firebaseAuth, firebaseConfigured } from './firebase'
+import MobileGuestListPortal from './MobileGuestListPortal'
 
 type ScheduleItem = { id: number; title: string; time: string; place: string; mapsUrl?: string }
 type GuestGroup = { id: string; name: string; count: number; rsvp?: 'pending' | 'attending' | 'declined'; invitationSent?: boolean; sentVia?: string }
@@ -1005,6 +1006,7 @@ function App() {
 
     <footer className="simple-footer"><span>invitecyprus <span>Made for life’s lovely moments.</span></span><span>Need a hand? &nbsp; Privacy</span></footer>
     {notice && <div className="simple-toast"><Check size={16}/>{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}><X size={14}/></button></div>}
+    <MobileGuestListPortal active={screen === 'guest-management' && Boolean(managedInvite)} groups={filteredGuestGroups} channels={invitationChannels} onSave={updateManagedGuestGroup} onRemove={removeGuest}/>
   </div>
 }
 export default App
